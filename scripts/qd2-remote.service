@@ -1,0 +1,18 @@
+[Unit]
+Description=QD_Q2 Remote (framebuffer + input bridge)
+After=network.target
+
+[Service]
+Type=simple
+Environment=QD_REMOTE_INPUT_SOCK=/run/qd2-remote-input.sock
+Environment=QD_HTTP_HOST=0.0.0.0
+Environment=QD_HTTP_PORT=18080
+Environment=PYTHONPATH=@PYTHON_DST@
+ExecStart=@VENV_PYTHON@ -m qd2_remote.service
+WorkingDirectory=@PYTHON_DST@
+Restart=on-failure
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target

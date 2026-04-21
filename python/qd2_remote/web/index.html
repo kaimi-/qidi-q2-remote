@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QD_Q2 Remote</title>
+<style>
+  :root {
+    --fb-w: 480;
+    --fb-h: 272;
+    --scale: 2;
+    --bg: #101317;
+    --panel: #181c22;
+    --accent: #3ea6ff;
+    --text: #e6e9ee;
+    --muted: #8a93a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  header {
+    padding: 10px 16px;
+    background: var(--panel);
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #242932;
+  }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+  header .status { color: var(--muted); font-size: 12px; }
+  header .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 6px; vertical-align: middle; }
+  header .dot.ok  { background: #49c26a; }
+  header .dot.err { background: #e55; }
+  main {
+    display: flex;
+    justify-content: center;
+    padding: 18px;
+  }
+  .screen-wrap {
+    position: relative;
+    width: calc(var(--fb-w) * var(--scale) * 1px);
+    height: calc(var(--fb-h) * var(--scale) * 1px);
+    background: #000;
+    border: 2px solid #2a313c;
+    border-radius: 8px;
+    overflow: hidden;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .screen-wrap img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    image-rendering: pixelated;
+    pointer-events: none;
+  }
+  .overlay {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    padding: 3px 6px;
+    font: 11px/1 monospace;
+    color: #fff;
+    background: rgba(0,0,0,0.55);
+    border-radius: 3px;
+    pointer-events: none;
+  }
+  .controls {
+    margin-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .controls label { display: flex; gap: 6px; align-items: center; }
+  .controls button, .controls select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid #2a313c;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .controls button:hover { border-color: var(--accent); }
+  code.cmd { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>QD_Q2 Remote</h1>
+  <span class="status"><span id="dot-hub" class="dot"></span>preload: <span id="hub">?</span></span>
+  <span class="status"><span id="dot-fb"  class="dot"></span>fb: <span id="fb">?</span></span>
+  <span class="status">last cmd: <code class="cmd" id="lastcmd">—</code></span>
+</header>
+<main>
+  <div class="screen-wrap" id="screen">
+    <img id="frame" src="/stream" alt="framebuffer">
+    <div class="overlay" id="coords">— , —</div>
+  </div>
+  <div class="controls">
+    <label>Scale
+      <select id="scale">
+        <option value="1">1x</option>
+        <option value="2" selected>2x</option>
+        <option value="3">3x</option>
+        <option value="4">4x</option>
+      </select>
+    </label>
+    <button id="btn-reload">Reload stream</button>
+    <button id="btn-snapshot">Save snapshot</button>
+  </div>
+</main>
+<script>
+(() => {
+  const FB_W = 480, FB_H = 272;
+  const screen    = document.getElementById("screen");
+  const frame     = document.getElementById("frame");
+  const coordsEl  = document.getElementById("coords");
+  const lastCmd   = document.getElementById("lastcmd");
+  const hubEl     = document.getElementById("hub");
+  const fbEl      = document.getElementById("fb");
+  const dotHub    = document.getElementById("dot-hub");
+  const dotFb     = document.getElementById("dot-fb");
+  const scaleSel  = document.getElementById("scale");
+
+  let dragging = false;
+  let lastSent = { x: -1, y: -1, t: 0 };
+
+  function setScale(s) {
+    document.documentElement.style.setProperty("--scale", s);
+  }
+  setScale(scaleSel.value);
+  scaleSel.addEventListener("change", () => setScale(scaleSel.value));
+
+  document.getElementById("btn-reload").addEventListener("click", () => {
+    frame.src = "/stream?t=" + Date.now();
+  });
+  document.getElementById("btn-snapshot").addEventListener("click", () => {
+    const a = document.createElement("a");
+    a.href = "/screenshot.jpg?t=" + Date.now();
+    a.download = "qd2_" + Date.now() + ".jpg";
+    a.click();
+  });
+
+  function mapCoords(ev) {
+    const rect = screen.getBoundingClientRect();
+    const cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+    const cy = (ev.touches ? ev.touches[0].clientY : ev.clientY) - rect.top;
+    let x = Math.floor(cx * FB_W / rect.width);
+    let y = Math.floor(cy * FB_H / rect.height);
+    x = Math.max(0, Math.min(FB_W - 1, x));
+    y = Math.max(0, Math.min(FB_H - 1, y));
+    return { x, y };
+  }
+
+  async function send(action, x, y) {
+    const body = action === "up"
+      ? { action }
+      : { action, x, y };
+    lastCmd.textContent = action + (x !== undefined ? ` ${x} ${y}` : "");
+    try {
+      await fetch("/input", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  screen.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    screen.setPointerCapture(ev.pointerId);
+    dragging = true;
+    const { x, y } = mapCoords(ev);
+    lastSent = { x, y, t: Date.now() };
+    send("down", x, y);
+  });
+
+  screen.addEventListener("pointermove", (ev) => {
+    const { x, y } = mapCoords(ev);
+    coordsEl.textContent = `${x} , ${y}`;
+    if (!dragging) return;
+    const now = Date.now();
+    if (x === lastSent.x && y === lastSent.y) return;
+    if (now - lastSent.t < 16) return;
+    lastSent = { x, y, t: now };
+    send("move", x, y);
+  });
+
+  function endPointer(ev) {
+    if (!dragging) return;
+    dragging = false;
+    try { screen.releasePointerCapture(ev.pointerId); } catch (e) {}
+    send("up");
+  }
+  screen.addEventListener("pointerup",     endPointer);
+  screen.addEventListener("pointercancel", endPointer);
+  screen.addEventListener("pointerleave",  (ev) => {
+    if (dragging) endPointer(ev);
+    coordsEl.textContent = "— , —";
+  });
+
+  screen.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
+  async function pollHealth() {
+    try {
+      const r = await fetch("/health");
+      const j = await r.json();
+      hubEl.textContent = j.preload_clients + " client(s)";
+      dotHub.className  = "dot " + (j.preload_clients > 0 ? "ok" : "err");
+      fbEl.textContent  = `${j.fb.width}x${j.fb.height} ${j.fb.pixel_format}`;
+      const fresh = j.last_frame_ts > 0 && (Date.now() / 1000 - j.last_frame_ts) < 5;
+      dotFb.className  = "dot " + (fresh ? "ok" : "err");
+    } catch (e) {
+      hubEl.textContent = "offline";
+      dotHub.className  = "dot err";
+      fbEl.textContent  = "offline";
+      dotFb.className   = "dot err";
+    }
+  }
+  pollHealth();
+  setInterval(pollHealth, 2000);
+})();
+</script>
+</body>
+</html>
