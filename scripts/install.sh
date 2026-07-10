@@ -155,12 +155,60 @@ sed "s|@VENV_PYTHON@|$VENV_DIR/bin/python|g; s|@PYTHON_DST@|$PYTHON_DST|g" \
 chmod 0644 "$UNIT_DST"
 systemctl daemon-reload
 
-echo "[*] Installing start.sh wrapper to /home/mks/QD_Q2/bin/start.sh (backup saved)"
-WRAP=/home/mks/QD_Q2/bin/start.sh
-if [ -f "$WRAP" ] && [ ! -f "$WRAP.bak" ]; then
-  cp "$WRAP" "$WRAP.bak"
+LEGACY_START=/home/mks/QD_Q2/bin/start.sh
+QIDI_CLIENT_START=/home/qidi/QIDI_Client/bin/start.sh
+
+patch_qidi_client_start() {
+  local target="$1"
+  local marker="# Added by qd2-remote installer"
+  local tmp
+
+  if grep -Fqx "$marker" "$target"; then
+    echo "[*] QIDI client launcher is already patched"
+    return
+  fi
+
+  if ! head -n 1 "$target" | grep -q '^#!'; then
+    echo "ERROR: $target has no shebang; refusing to patch it" >&2
+    exit 1
+  fi
+
+  if [ ! -f "$target.bak" ]; then
+    cp -p "$target" "$target.bak"
+  fi
+
+  tmp=$(mktemp "${target}.qd2-remote.XXXXXX")
+  awk -v preload_dst="$PRELOAD_DST" '
+    NR == 1 {
+      print
+      print ""
+      print "# Added by qd2-remote installer"
+      print "export QD_REMOTE_INPUT_SOCK=\"${QD_REMOTE_INPUT_SOCK:-/run/qd2-remote-input.sock}\""
+      print "export LD_PRELOAD=\"${LD_PRELOAD_OVERRIDE:-" preload_dst "}\""
+      next
+    }
+    { print }
+  ' "$target" > "$tmp"
+  chmod --reference="$target" "$tmp"
+  chown --reference="$target" "$tmp"
+  mv "$tmp" "$target"
+}
+
+if [ -f "$QIDI_CLIENT_START" ]; then
+  echo "[*] Patching QIDI client launcher (backup saved)"
+  patch_qidi_client_start "$QIDI_CLIENT_START"
+elif [ -f "$LEGACY_START" ]; then
+  echo "[*] Installing start.sh wrapper to $LEGACY_START (backup saved)"
+  if [ ! -f "$LEGACY_START.bak" ]; then
+    cp "$LEGACY_START" "$LEGACY_START.bak"
+  fi
+  install -m 0755 "$SRC_ROOT/scripts/start.sh" "$LEGACY_START"
+else
+  echo "ERROR: no supported QIDI client launcher found" >&2
+  echo "       checked: $QIDI_CLIENT_START" >&2
+  echo "       checked: $LEGACY_START" >&2
+  exit 1
 fi
-install -m 0755 "$SRC_ROOT/scripts/start.sh" "$WRAP"
 
 echo "[*] Done."
 echo "    enable:  systemctl enable --now qd2-remote.service"

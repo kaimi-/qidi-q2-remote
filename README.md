@@ -67,7 +67,8 @@ The script asks whether to build the preload library locally or use a prebuilt o
 - creates a venv in `/opt/qd2-remote/venv` (via `uv`)
 - installs the Python web service to `/opt/qd2-remote`
 - drops a systemd unit at `/etc/systemd/system/qd2-remote.service`
-- replaces `/home/mks/QD_Q2/bin/start.sh` (the old one is kept as `start.sh.bak`)
+- on older printers, replaces `/home/mks/QD_Q2/bin/start.sh` (the old one is kept as `start.sh.bak`)
+- on newer printers, patches `/home/qidi/QIDI_Client/bin/start.sh` in place to add the preload environment (the original is kept as `start.sh.bak`)
 
 If `uv` is in your user home, pass its path through sudo:
 
@@ -110,7 +111,7 @@ There's no auth. Don't expose it to the open internet. If you need LAN access, p
 
 **Browser shows a black screen.** Usually a pixel format mismatch. Check `/health` — the service reports the format it picked. The fb read order is `BGRA → BGRX → RGBA → RGBX`.
 
-**Clicks do nothing.** Check `/health` → `preload_clients`. If zero, the GUI wasn't launched with `LD_PRELOAD`, or the socket path doesn't match. Confirm `start.sh` is the replaced version.
+**Clicks do nothing.** Check `/health` → `preload_clients`. If zero, the GUI wasn't launched with `LD_PRELOAD`, or the socket path doesn't match. Confirm the installed `start.sh` was replaced (older printers) or patched (newer printers).
 
 **GUI crashes on start.** Turn on `QD_REMOTE_DEBUG=1` in `start.sh` and re-run. The preload lib will log every intercepted call. If a new `ioctl` shows up that isn't emulated, open an issue with the request number.
 
